@@ -1,135 +1,173 @@
-require 'torch'
-require 'rnn'
+State = savestate.create(1)
+savestate.load(State)
 
-Inputs = require './inputs'
-Helpers = require './helpers'
-Globals = require './globals'
-Network = require './network'
-CMAES = require './cmaes'
+Player = 1
+MaxEnemies = 5
+LeftMargin = 10
+TopMargin = 40
+LineHeight = 10
+MaxDistance = 255
 
-_stateNum = 1
-_state = savestate.create(_stateNum)
-savestate.load(_state)
+ButtonNames = {
+    "A",
+    "B",
+    "Up",
+    "Down",
+    "Left",
+    "Right",
+}
 
-_nn = Network(_numInputs, _numHidden, _numOutputs)
+NumInputs = 5
+NumOutputs = 3
+--network = makeNeuralNet(NumInputs, NumOutputs)
 
-_cmaes = CMAES(_genomeSize)
-_lambda = _cmaes.lambda
-_offspring = _cmaes:generateOffspring()
 
-_nn:setWeights(_offspring[_curOffspring].genome)
 
-emu.speedmode('maximum')
+init_time = os.time()
+
+BoxRadius = 6
+InputSize = (BoxRadius*2+1)*(BoxRadius*2+1)
+
+function getMario()
+	marioX = memory.readbyte(0x6D) * 0x100 + memory.readbyte(0x86)
+	marioY = memory.readbyte(0x03B8)+16
+	
+	screenX = memory.readbyte(0x03AD)
+	screenY = memory.readbyte(0x03B8)
+end
+
+function getTile(dx, dy)
+	local x = marioX + dx + 8
+	local y = marioY + dy - 16
+	local page = math.floor(x/256)%2
+    -- 0x0500-0x069F	Current tile
+    -- terrain is at 0x5B0-0x5CF and 0x680-0x69F (two rows)
+    -- 0x500-0x5DF First screen 16x13
+    -- 0x5E0-0x69F Second screen 16x13
+	local subx = math.floor((x%256)/16)
+	local suby = math.floor((y - 32)/16)
+	local addr = 0x500 + page*13*16+suby*16+subx
+		
+	if suby >= 13 or suby < 0 then
+		return 0
+	end
+		
+    local tileContent = memory.readbyte(addr)
+	if tileContent ~= 0 then
+		return 1
+	else
+		return 0
+	end
+end
+
+function getSprites()
+	local sprites = {}
+	for slot=0,4 do
+		-- 0x000F-0x0013 Enemy active?
+		local enemy = memory.readbyte(0xF+slot)
+		if enemy ~= 0 then
+			-- 0x006E-0x0072 Enemy horizontal position in level
+			-- 0x0087/B	Enemy x position on screen
+			local inLevel = memory.readbyte(0x6E + slot)
+			local onScreen = memory.readbyte(0x87 + slot)
+			local ex = inLevel * 0x100 + onScreen
+			-- 0x00CF-0x00D3	Enemy y pos on screen (multiply with value at 0x00B6/A to get level y pos)
+			local ey = memory.readbyte(0xCF + slot) + 24
+			
+			--emu.print(ex .. ' ' .. ey .. ' ' .. inLevel .. ' ' .. onScreen)
+			sprites[#sprites+1] = { x = ex, y = ey }
+		end
+	end
+
+	-- emu.print('Found ' .. #sprites .. ' sprites')
+		
+	return sprites
+end
+
+function getExtendedSprites()
+	return {}
+end
+
+function getMarioState()
+		-- 0x000E	Player's state
+		local states = { 
+			'Leftmost of screen',
+			'Climbing vine',
+			'Entering reversed-L pipe',
+			'Going down a pipe',
+			'Autowalk',
+			'Autowalk',
+			'Player dies',
+			'Entering area',
+			'Normal',
+			'Cannot move',
+			--' ',
+			'Dying',
+			'Palette cycling, can\'t move'
+		}
+		local stateCode = memory.readbyte(0xE)
+
+    return states[stateCode]
+end
+
+
+function getInputs()
+	getMario()
+	
+	sprites = getSprites()
+	extended = getExtendedSprites()
+	
+	local inputs = {}
+	
+	for dy=-BoxRadius*16,BoxRadius*16,16 do
+		for dx=-BoxRadius*16,BoxRadius*16,16 do
+			inputs[#inputs+1] = 0
+			
+			tile = getTile(dx, dy)
+			if tile == 1 and marioY+dy < 0x1B0 then
+				inputs[#inputs] = 1
+			end
+			
+			for i = 1,#sprites do
+				distx = math.abs(sprites[i]["x"] - (marioX+dx))
+				disty = math.abs(sprites[i]["y"] - (marioY+dy))
+				if distx <= 8 and disty <= 8 then
+					inputs[#inputs] = -1
+				end
+			end
+		end
+	end
+	
+	--mariovx = memory.read_s8(0x7B)
+	--mariovy = memory.read_s8(0x7D)
+	
+	return inputs
+end
 
 while true do
-  
-	local mario = Inputs.getMario()
+	emu.print('Hello, frame!')
 
-	local marioState = Inputs.getMarioState()
-   --print ('Mario has state ' .. marioState)
-	local marioDead = marioState == 'Dying' or marioState == 'Player dies'
-  
-  local marioPowerupState = Inputs.getMarioPowerupState()
-  local bigScore = 0
-  local fieryScore = 0
-  
-  if marioPowerupState == 'Big' then
-    bigScore = _bigBonus
-  elseif marioPowerupState == 'Fiery' then
-    fieryScore = _fieryBonus
-  end 
-    
-  --print ('Mario has powerup state ' .. marioPowerupState)
+	getMario()
+	sprites = getSprites()
 
-	gui.text(_leftMargin, _bottomMargin - 3*_lineHeight, 'Generation: ' .. _generationCount)
-	gui.text(_leftMargin, _bottomMargin - 2*_lineHeight, 'Individual: ' .. _curOffspring)
+	emu.print('MarioXY ' .. marioX .. ' ' .. marioY)
 
-	if _frameCounter > _maxEvals or marioDead then
-		--local gameTime = Inputs.getTime()
-    
-    local marioScore = Inputs.getMarioScore() + mario.x + (mario.x > _endLevel and _endLevelBonus or 0) - 40
-  
-    local coinScore = Inputs.getCoins() * _coinBonus
-    
-    local powerupScore = bigScore + fieryScore
-
-		local fitness = marioScore + powerupScore + coinScore--(_maxTime - gameTime)
-
-    if marioDead then 
-      print('Mario is dead') 
-    end
-
-		_cmaes:setFitness(_curOffspring, fitness)
-    print('Gen ' .. _generationCount .. ': Offspring ' .. _curOffspring .. ' finished with fitness of ' .. fitness .. ' at x pos ' .. mario.x)
-
-		_frameCounter = 0
-		_curOffspring = _curOffspring + 1
-
-		if _curOffspring > _lambda then
-      --writeFile("backup." .. _cmaes .. "." .. '.cmaes')
-      print('---- Generation ' .. _generationCount .. ' ended. ----')
-			local stats = _cmaes:endGeneration()
-			print('---- Best fitness for Generation ' .. _generationCount .. ' is ' .. stats.best.fitness.. ' ----')
-
-			table.insert(_generationStats, stats)
-
-			if _generationCount == _maxGenerations then
-				_.each(_generationStats, function(k, v)
-					print(string.format('%.4f', v.best.fitness))
-					print(v.best.genome)
-				end)
-				os.exit()
-			end
-
-			_offspring = _cmaes:generateOffspring()
-			_curOffspring = 1
-			_generationCount = _generationCount + 1
-		end
-
-		_nn:setWeights(_offspring[_curOffspring].genome)
-		savestate.load(_state)
-	else
-		local sprites = Inputs.getSprites()
-		local distances = Inputs.getDistances(mario, sprites)
-		local distancesTensor = torch.Tensor(1, 5):fill(_maxDist)
-		for i = 1, #distances do
-			distancesTensor[1][i] = distances[i]
-		end
-		distancesTensor = (distancesTensor:div(_maxDist) * 2) - 1
-
-		if _frameCounter % 3 == 0 then
-			local tiles = Inputs.getTiles(_boxRadius, mario)
-			local tilesTensor = torch.Tensor(tiles):reshape(1, #tiles)
-
-			local input = torch.cat(tilesTensor, distancesTensor)
-
-			output = _nn:feed(input)
-		end
-    
-    --print('A: ' .. output[1][1] .. ', Left: ' .. output[1][2] .. ', Right: ' .. output[1][3])
-    
-    --if #distances == 0 then
-    --  joypad.set(_player, {right = 1})
-    --else
-    
-    --if _frameCounter % 100 == 0 then
-      --local randA = torch.bernoulli(0.5)
-      --local randLeft = torch.bernoulli(0.5)
-      --local randRight = torch.bernoulli(0.5)
-      
-      --joypad.set(_player, { A = (randA == 1), left = (randLeft == 1), right = (randRight == 1) })
-    --else
-      joypad.set(_player, { A = (output[1][1] > 0), left = (output[1][2] > 0), right = (output[1][3] > 0) })
-    --end
-
-		gui.text(_leftMargin, _topMargin, 'Mario ' .. (mario and string.format('%d, %d', mario.x, mario.y) or 'NaN'))
-		for i = 1, _maxEnemies do
-			local text = sprites[i] and string.format('%d, %d, %.3f', sprites[i].x, sprites[i].y, distancesTensor[1][i]) or 'NaN'
-			gui.text(_leftMargin, _topMargin + (i*_lineHeight), 'Sprite' .. i .. ' ' .. text)
-		end
-
-		_frameCounter = _frameCounter + 1
+	if os.time() - init_time > .05 then
+		init_time = os.time()
 	end
+    
+    local padInput = joypad.get(Player)
+ 	print(padInput)
+    
+    gui.text(LeftMargin, TopMargin, 'Mario ' .. (string.format('%d, %d', marioX, marioY) or 'NaN'))
+ 	for i = 1, MaxEnemies do
+ 		local text = sprites[i] and string.format('%d, %d', sprites[i].x, sprites[i].y) or 'NaN'
+ 		gui.text(LeftMargin, TopMargin + (i*LineHeight), 'Sprite' .. i .. ' ' .. text)
+  	end
+
+	--gui.text(12, 50, 'SpriteX ' .. (sprites and #sprites > 0 and sprites[1].x or 'NaN'))
+	--gui.text(12, 60, 'MarioX ' .. (marioX or 'NaN'))
+    --gui.text(12, 80, 'State ' .. (states and #states > 0 or 'NaN'))
 
 	emu.frameadvance()
 end
