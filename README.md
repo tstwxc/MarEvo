@@ -1,5 +1,5 @@
 # MarEvo
-A Super Mario Bros. Machine Learning approach using Neuroevolution. Implemented by Aren Wells, Matt Huraza, and Trenton Thompson.
+A Super Mario Bros. machine learning approach using neuroevolution. Implemented by Aren Wells, Matt Huraza, and Trenton Thompson.
 
 ## TODO:
 - Restructure some code and re-analyze portions (primarily network and cmaes)
