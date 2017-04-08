@@ -38,6 +38,7 @@ _score = 0
 
 _stateNum = 1
 _state = savestate.create(_stateNum)
+savestate.save(_state)
 savestate.load(_state)
 
 function getPositions()
@@ -992,7 +993,7 @@ while true do
         end
         marioAgent.fitness = fitness
         
-        gui.text(0, 150, "Mario fitness: " .. marioAgent.fitness)
+        --gui.text(0, 150, "Mario fitness: " .. marioAgent.fitness)
         
         if fitness > pool.maxFitness then
             pool.maxFitness = fitness
