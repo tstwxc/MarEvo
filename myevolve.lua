@@ -88,6 +88,20 @@ end
 function getExtendedSprites()
   return {}
 end
+
+function getMarioScore()
+    -- 0x07DD-0x07E2	Mario score (1000000 100000 10000 1000 100 10)
+    local addresses = { 0x7DD, 0x7DE, 0x7DF, 0x7E0, 0x7E1, 0x7E2 }
+    local scores = { 1000000, 100000, 10000, 1000, 100, 10 }
+    local score = 0
+    -- FIXME!
+    for i = 1, table.getn(addresses) do
+        score = score + (scores[i] * memory.readbyte(addresses[i]))
+    end
+
+    return score
+end
+
 function getInputs()
     getPositions()
     
@@ -966,6 +980,9 @@ while true do
     local marioAgent = group.marioAgents[pool.currentMarioAgent]
     
     displayMarioAgent(marioAgent)
+    marioScore = getMarioScore()
+    
+    gui.text(0, 150, "Mario has score " .. marioScore)
     
     if pool.currentFrame%5 == 0 then
         evaluateCurrent()
@@ -984,7 +1001,7 @@ while true do
     local timeoutBonus = pool.currentFrame / 4
     
     if timeout + timeoutBonus <= 0 then
-        local fitness = rightmost - pool.currentFrame / 2
+        local fitness = (rightmost - pool.currentFrame / 2) + (marioScore / 10)
         if rightmost > 3186 then
             fitness = fitness + 1000
         end
@@ -1021,7 +1038,7 @@ while true do
     end
     
     gui.text(0, 212, "Gen: " .. pool.generation .. " || Group: " .. pool.currentGroup .. " || Agent: " .. pool.currentMarioAgent .. " || Measured: " .. math.floor(measured/total*100) .. " %")
-        gui.text(0, 220, "Fitness: " .. math.floor(rightmost - (pool.currentFrame) / 2 - (timeout + timeoutBonus)*2/3) .. " || Max Fitness: " .. math.floor(pool.maxFitness))
+        gui.text(0, 220, "Fitness: " .. math.floor(rightmost - (pool.currentFrame) / 2 - (timeout + timeoutBonus)*2/3) + (marioScore / 10) .. " || Max Fitness: " .. math.floor(pool.maxFitness))
     
     pool.currentFrame = pool.currentFrame + 1
   
